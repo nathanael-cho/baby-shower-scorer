@@ -1,2 +1,106 @@
+import datetime as dt
+import difflib
+import os
+from pathlib import Path
+
+import gspread
+import polars as pl
+from dotenv import load_dotenv
+from oauth2client.service_account import ServiceAccountCredentials
+
+
+load_dotenv()
+
+KEY_PATH = os.getenv('GOOGLE_SHEETS_KEY')
+SHEET_ID = os.getenv('SHEET_ID')
+SCOPE = ['https://www.googleapis.com/auth/spreadsheets.readonly']  # Permission scope
+
+ACTUAL_FIRST_NAME=os.getenv('ACTUAL_FIRST_NAME')
+ACTUAL_MIDDLE_NAME=os.getenv('ACTUAL_MIDDLE_NAME')
+ACTUAL_GENDER=os.getenv('ACTUAL_GENDER')
+ACTUAL_LENGTH=int(os.getenv('ACTUAL_LENGTH'))
+ACTUAL_WEIGHT_LBS=int(os.getenv('ACTUAL_WEIGHT_LBS'))
+ACTUAL_WEIGHT_OZS=int(os.getenv('ACTUAL_WEIGHT_OZS'))
+ACTUAL_BIRTHDAY=dt.datetime.strptime(os.getenv('ACTUAL_BIRTHDAY'), '%m/%d/%Y').date()
+ACTUAL_LABOR_HOURS=int(os.getenv('ACTUAL_LABOR_HOURS'))
+ACTUAL_EPIDURAL=os.getenv('ACTUAL_EPIDURAL')
+ACTUAL_CUT_CORD=os.getenv('ACTUAL_CUT_CORD')
+ACTUAL_CATCH=os.getenv('ACTUAL_CATCH')
+ACTUAL_FAINT=os.getenv('ACTUAL_FAINT')
+
+OUTPUT_DIR = Path(__file__).parent / 'outputs'
+
+
+def calc_name_distance(n1: str, n2: str) -> float:
+    # The ratio is a measure of similarity between 0 and 1, so 1 - it yields a "typical" distance
+    #      where closer is better
+    return 1 - difflib.SequenceMatcher(None, n1.strip().lower(), n2.strip().lower()).ratio()
+
+
 if __name__ == '__main__':
-    raise RuntimeError('Not implemented yet!')
+    creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_PATH, SCOPE)
+    client = gspread.authorize(creds)
+
+    sheet = client.open_by_key(SHEET_ID)
+    worksheet = sheet.sheet1
+
+    # The DataFrame is definitely overkill, but oh well
+    entries = pl.DataFrame(worksheet.get_all_records()).rename({
+        # Your Name
+        "Baby's First Name": 'First Name',
+        # Middle Name
+        # Gender
+        'Length (in inches)': 'Length',
+        'Weight, pounds part (this question is together with the next question)': 'Pounds',
+        'Weight, ounces part (this question is together with the previous question)': 'Ounces',
+        # Birthday
+        'Hours in labor *in the hospital* before delivery': 'Labor Hours',
+        'Did Ashlynne get an epidural?': 'Epidural',
+        'Did Nacho cut the cord?': 'Cut Cord',
+        'Did Nacho catch the baby?!': 'Catch Baby',
+        'Did Nacho faint?!!': 'Faint'
+    })
+
+    # Clean up the dates
+    entries = entries.with_columns(pl.col('Birthday').str.strptime(pl.Date, '%m/%d/%Y').alias('Birthday'))
+
+    # For all of these, make sure that a lower value is better, "closer" in distance terms
+    # Furthermore, make sure all of these are nonnegative
+    # Also, make sure all of these are Float64s
+    distances = entries.with_columns(
+        pl.col('First Name').map_elements(lambda f: calc_name_distance(f, ACTUAL_FIRST_NAME), return_dtype=pl.Float64).alias('First Name'),
+        pl.col('Middle Name').map_elements(lambda m: calc_name_distance(m, ACTUAL_MIDDLE_NAME), return_dtype=pl.Float64).alias('Middle Name'),
+        (1 - (pl.col('Gender') == ACTUAL_GENDER).cast(pl.Float64)).alias('Gender'),
+        (pl.col('Length') - ACTUAL_LENGTH).abs().cast(pl.Float64).alias('Length'),
+        pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (ACTUAL_WEIGHT_LBS + ACTUAL_WEIGHT_OZS / 16.)), return_dtype=pl.Float64).alias('Weight'),
+        pl.col('Birthday').map_elements(lambda b: abs((b - ACTUAL_BIRTHDAY).days), return_dtype=pl.Int64).alias('Birthday'),
+        (pl.col('Labor Hours') - ACTUAL_LABOR_HOURS).abs().cast(pl.Float64).alias('Labor Hours'),
+        (1 - (pl.col('Epidural') == ACTUAL_EPIDURAL).cast(pl.Float64)).alias('Epidural'),
+        (1 - (pl.col('Cut Cord') == ACTUAL_CUT_CORD).cast(pl.Float64)).alias('Cut Cord'),
+        (1 - (pl.col('Catch Baby') == ACTUAL_CATCH).cast(pl.Float64)).alias('Catch Baby'),
+        (1 - (pl.col('Faint') == ACTUAL_FAINT).cast(pl.Float64)).alias('Faint')
+    ).drop(['Pounds', 'Ounces'])  # Now that we calculated weight, we don't need these
+
+    # Scale some distances so that all distances are between 0 and 1
+    distances_scaled_01 = distances.with_columns(*[
+        pl.col(c) / pl.when(pl.col(c).max() > 0).then(pl.col(c).max()).otherwise(0.).alias(c)
+         for c in ['Length', 'Weight', 'Birthday', 'Labor Hours']
+    ])
+
+    # The higher the average distance away from the correct answer, the harder the question
+    difficulty = distances_scaled_01.drop(['Your Name', 'Timestamp']).mean()
+    # The maximum error anyone achieved compared to the correct answer, possibly 0
+    max_error = distances_scaled_01.drop(['Your Name', 'Timestamp']).max()
+
+    scores_by_column = distances_scaled_01.with_columns(*[
+        (difficulty[c][0] * (1 - pl.col(c)) / (max_error[c][0] if max_error[c][0] > 0 else 1)).alias(c)
+        for c in distances_scaled_01.columns if c in difficulty.columns
+    ])
+
+    overall_scores = scores_by_column.with_columns(
+        pl.sum_horizontal(pl.col(c) for c in ['First Name', 'Middle Name', 'Gender', 'Length', 'Weight', 'Birthday', 'Labor Hours', 'Epidural', 'Cut Cord', 'Catch Baby', 'Faint']).alias('Overall Score')
+    ).drop(['First Name', 'Middle Name', 'Gender', 'Length', 'Weight', 'Birthday', 'Labor Hours', 'Epidural', 'Cut Cord', 'Catch Baby', 'Faint'])
+
+    OUTPUT_DIR.mkdir(exist_ok=True)
+
+    overall_scores.write_csv(OUTPUT_DIR / 'overall_scores.csv')
