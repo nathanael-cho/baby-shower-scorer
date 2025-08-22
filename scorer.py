@@ -65,7 +65,7 @@ if __name__ == '__main__':
     entries = entries.with_columns(pl.col('Birthday').str.strptime(pl.Date, '%m/%d/%Y').alias('Birthday'))
 
     # For all of these, make sure that a lower value is better, "closer" in distance terms
-    # Furthermore, make sure all of these are nonnegative
+    # Furthermore, make sure all of these are nonnegative and yield 0 for an exact answer
     # Also, make sure all of these are Float64s
     distances = entries.with_columns(
         pl.col('First Name').map_elements(lambda f: calc_name_distance(f, ACTUAL_FIRST_NAME), return_dtype=pl.Float64).alias('First Name'),
