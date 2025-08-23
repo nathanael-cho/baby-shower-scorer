@@ -18,6 +18,8 @@ SCOPE = ['https://www.googleapis.com/auth/spreadsheets.readonly']  # Permission 
 ACTUAL_FIRST_NAME=os.getenv('ACTUAL_FIRST_NAME')
 ACTUAL_MIDDLE_NAME=os.getenv('ACTUAL_MIDDLE_NAME')
 ACTUAL_GENDER=os.getenv('ACTUAL_GENDER')
+ACTUAL_HAIR_COLOR=os.getenv('ACTUAL_HAIR_COLOR')
+ACTUAL_EYE_COLOR=os.getenv('ACTUAL_EYE_COLOR')
 ACTUAL_LENGTH=int(os.getenv('ACTUAL_LENGTH'))
 ACTUAL_WEIGHT_LBS=int(os.getenv('ACTUAL_WEIGHT_LBS'))
 ACTUAL_WEIGHT_OZS=int(os.getenv('ACTUAL_WEIGHT_OZS'))
@@ -50,6 +52,8 @@ if __name__ == '__main__':
         "Baby's First Name": 'First Name',
         # Middle Name
         # Gender
+        # Hair Color
+        # Eye Color
         'Length (in inches)': 'Length',
         'Weight, pounds part (this question is together with the next question)': 'Pounds',
         'Weight, ounces part (this question is together with the previous question)': 'Ounces',
@@ -71,6 +75,8 @@ if __name__ == '__main__':
         pl.col('First Name').map_elements(lambda f: calc_name_distance(f, ACTUAL_FIRST_NAME), return_dtype=pl.Float64).alias('First Name'),
         pl.col('Middle Name').map_elements(lambda m: calc_name_distance(m, ACTUAL_MIDDLE_NAME), return_dtype=pl.Float64).alias('Middle Name'),
         (1 - (pl.col('Gender') == ACTUAL_GENDER).cast(pl.Float64)).alias('Gender'),
+        (1 - (pl.col('Hair Color') == ACTUAL_HAIR_COLOR).cast(pl.Float64)).alias('Hair Color'),
+        (1 - (pl.col('Eye Color') == ACTUAL_EYE_COLOR).cast(pl.Float64)).alias('Eye Color'),
         (pl.col('Length') - ACTUAL_LENGTH).abs().cast(pl.Float64).alias('Length'),
         pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (ACTUAL_WEIGHT_LBS + ACTUAL_WEIGHT_OZS / 16.)), return_dtype=pl.Float64).alias('Weight'),
         pl.col('Birthday').map_elements(lambda b: abs((b - ACTUAL_BIRTHDAY).days), return_dtype=pl.Int64).alias('Birthday'),
@@ -97,9 +103,15 @@ if __name__ == '__main__':
         for c in distances_scaled_01.columns if c in difficulty.columns
     ])
 
+    columns_for_score = [
+        'First Name', 'Middle Name', 'Gender', 'Hair Color',
+        'Eye Color', 'Length', 'Weight', 'Birthday',
+        'Labor Hours', 'Epidural', 'Cut Cord', 'Catch Baby',
+        'Faint'
+    ]
     overall_scores = scores_by_column.with_columns(
-        pl.sum_horizontal(pl.col(c) for c in ['First Name', 'Middle Name', 'Gender', 'Length', 'Weight', 'Birthday', 'Labor Hours', 'Epidural', 'Cut Cord', 'Catch Baby', 'Faint']).alias('Overall Score')
-    ).drop(['First Name', 'Middle Name', 'Gender', 'Length', 'Weight', 'Birthday', 'Labor Hours', 'Epidural', 'Cut Cord', 'Catch Baby', 'Faint'])
+        pl.sum_horizontal(pl.col(c) for c in columns_for_score).alias('Overall Score')
+    ).drop(columns_for_score)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
 
