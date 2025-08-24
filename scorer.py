@@ -44,6 +44,7 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
     df = pl.DataFrame(records)
     entries = df.rename({
         # Your Name
+        # Your Email
         "Baby's First Name": 'First Name',
         # Middle Name
         # Gender
@@ -89,9 +90,9 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
     ])
 
     # The higher the average distance away from the correct answer, the harder the question
-    difficulty = distances_scaled_01.drop(['Your Name', 'Timestamp']).mean()
+    difficulty = distances_scaled_01.drop(['Your Name', 'Your Email', 'Timestamp']).mean()
     # The maximum error anyone achieved compared to the correct answer, possibly 0
-    max_error = distances_scaled_01.drop(['Your Name', 'Timestamp']).max()
+    max_error = distances_scaled_01.drop(['Your Name', 'Your Email', 'Timestamp']).max()
 
     scores_by_column = distances_scaled_01.with_columns(*[
         (difficulty[c][0] * (1 - pl.col(c)) / (max_error[c][0] if max_error[c][0] > 0 else 1)).alias(c)
