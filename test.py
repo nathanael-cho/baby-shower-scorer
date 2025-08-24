@@ -11,6 +11,7 @@ class bcolors:
 if __name__ == '__main__':
     guess1 = {
         "Your Name": "Jackie",
+        "Your Email": "Jac.kie",
         "Timestamp": ":)",
         "Baby's First Name": "Gus",
         "Middle Name": "Pat",
@@ -29,6 +30,7 @@ if __name__ == '__main__':
     }
     guess2 = {
         "Your Name": "Brian",
+        "Your Email": "Bri.an",
         "Timestamp": "0",
         "Baby's First Name": "Gustavo",
         "Middle Name": "Patrick",
@@ -50,12 +52,14 @@ if __name__ == '__main__':
 
     result = scorer.calc_scores(guesses, actual)
 
-    assert(result.shape == (2, 3))
-    assert(result.columns == ["Your Name", "Timestamp", "Overall Score"])
+    assert(result.shape == (2, 4))
+    assert(result.columns == ["Your Name", "Your Email", "Timestamp", "Overall Score"])
     assert(result["Your Name"][0] == "Jackie")
+    assert(result["Your Email"][0] == "Jac.kie")
     assert(result["Timestamp"][0] == ":)")
     assert(math.isclose(result["Overall Score"][0], 2.64875))
     assert(result["Your Name"][1] == "Brian")
+    assert(result["Your Email"][1] == "Bri.an")
     assert(result["Timestamp"][1] == "0")
     assert(result["Overall Score"][1] == 2.0)
     print(bcolors.OKGREEN + "All tests pass!" + bcolors.ENDC)
