@@ -2,6 +2,7 @@ import datetime as dt
 import difflib
 import os
 from pathlib import Path
+from typing import Dict, List, NamedTuple, Union
 
 import gspread
 import polars as pl
@@ -15,39 +16,33 @@ KEY_PATH = os.getenv('GOOGLE_SHEETS_KEY')
 SHEET_ID = os.getenv('SHEET_ID')
 SCOPE = ['https://www.googleapis.com/auth/spreadsheets.readonly']  # Permission scope
 
-ACTUAL_FIRST_NAME=os.getenv('ACTUAL_FIRST_NAME')
-ACTUAL_MIDDLE_NAME=os.getenv('ACTUAL_MIDDLE_NAME')
-ACTUAL_GENDER=os.getenv('ACTUAL_GENDER')
-ACTUAL_HAIR_COLOR=os.getenv('ACTUAL_HAIR_COLOR')
-ACTUAL_EYE_COLOR=os.getenv('ACTUAL_EYE_COLOR')
-ACTUAL_LENGTH=int(os.getenv('ACTUAL_LENGTH'))
-ACTUAL_WEIGHT_LBS=int(os.getenv('ACTUAL_WEIGHT_LBS'))
-ACTUAL_WEIGHT_OZS=int(os.getenv('ACTUAL_WEIGHT_OZS'))
-ACTUAL_BIRTHDAY=dt.datetime.strptime(os.getenv('ACTUAL_BIRTHDAY'), '%m/%d/%Y').date()
-ACTUAL_LABOR_HOURS=int(os.getenv('ACTUAL_LABOR_HOURS'))
-ACTUAL_EPIDURAL=os.getenv('ACTUAL_EPIDURAL')
-ACTUAL_CUT_CORD=os.getenv('ACTUAL_CUT_CORD')
-ACTUAL_CATCH=os.getenv('ACTUAL_CATCH')
-ACTUAL_FAINT=os.getenv('ACTUAL_FAINT')
-
 OUTPUT_DIR = Path(__file__).parent / 'outputs'
 
+class BabyStats(NamedTuple):
+    first: str
+    middle: str
+    gender: str
+    hair: str
+    eye: str
+    length: int
+    weight_lbs: int
+    weight_ozs: int
+    birthday: dt.date
+    labor_hours: int
+    epidural: str
+    cut_cord: str
+    catch: str
+    faint: str
 
 def calc_name_distance(n1: str, n2: str) -> float:
     # The ratio is a measure of similarity between 0 and 1, so 1 - it yields a "typical" distance
     #      where closer is better
     return 1 - difflib.SequenceMatcher(None, n1.strip().lower(), n2.strip().lower()).ratio()
 
-
-if __name__ == '__main__':
-    creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_PATH, SCOPE)
-    client = gspread.authorize(creds)
-
-    sheet = client.open_by_key(SHEET_ID)
-    worksheet = sheet.sheet1
-
+def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabyStats) -> pl.DataFrame:
     # The DataFrame is definitely overkill, but oh well
-    entries = pl.DataFrame(worksheet.get_all_records()).rename({
+    df = pl.DataFrame(records)
+    entries = df.rename({
         # Your Name
         # Your Email
         "Baby's First Name": 'First Name',
@@ -73,19 +68,19 @@ if __name__ == '__main__':
     # Furthermore, make sure all of these are nonnegative and yield 0 for an exact answer
     # Also, make sure all of these are Float64s
     distances = entries.with_columns(
-        pl.col('First Name').map_elements(lambda f: calc_name_distance(f, ACTUAL_FIRST_NAME), return_dtype=pl.Float64).alias('First Name'),
-        pl.col('Middle Name').map_elements(lambda m: calc_name_distance(m, ACTUAL_MIDDLE_NAME), return_dtype=pl.Float64).alias('Middle Name'),
-        (1 - (pl.col('Gender') == ACTUAL_GENDER).cast(pl.Float64)).alias('Gender'),
-        (1 - (pl.col('Hair Color') == ACTUAL_HAIR_COLOR).cast(pl.Float64)).alias('Hair Color'),
-        (1 - (pl.col('Eye Color') == ACTUAL_EYE_COLOR).cast(pl.Float64)).alias('Eye Color'),
-        (pl.col('Length') - ACTUAL_LENGTH).abs().cast(pl.Float64).alias('Length'),
-        pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (ACTUAL_WEIGHT_LBS + ACTUAL_WEIGHT_OZS / 16.)), return_dtype=pl.Float64).alias('Weight'),
-        pl.col('Birthday').map_elements(lambda b: abs((b - ACTUAL_BIRTHDAY).days), return_dtype=pl.Int64).alias('Birthday'),
-        (pl.col('Labor Hours') - ACTUAL_LABOR_HOURS).abs().cast(pl.Float64).alias('Labor Hours'),
-        (1 - (pl.col('Epidural') == ACTUAL_EPIDURAL).cast(pl.Float64)).alias('Epidural'),
-        (1 - (pl.col('Cut Cord') == ACTUAL_CUT_CORD).cast(pl.Float64)).alias('Cut Cord'),
-        (1 - (pl.col('Catch Baby') == ACTUAL_CATCH).cast(pl.Float64)).alias('Catch Baby'),
-        (1 - (pl.col('Faint') == ACTUAL_FAINT).cast(pl.Float64)).alias('Faint')
+        pl.col('First Name').map_elements(lambda f: calc_name_distance(f, actual.first), return_dtype=pl.Float64).alias('First Name'),
+        pl.col('Middle Name').map_elements(lambda m: calc_name_distance(m, actual.middle), return_dtype=pl.Float64).alias('Middle Name'),
+        (1 - (pl.col('Gender') == actual.gender).cast(pl.Float64)).alias('Gender'),
+        (1 - (pl.col('Hair Color') == actual.hair).cast(pl.Float64)).alias('Hair Color'),
+        (1 - (pl.col('Eye Color') == actual.eye).cast(pl.Float64)).alias('Eye Color'),
+        (pl.col('Length') - actual.length).abs().cast(pl.Float64).alias('Length'),
+        pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (actual.weight_lbs + actual.weight_ozs / 16.)), return_dtype=pl.Float64).alias('Weight'),
+        pl.col('Birthday').map_elements(lambda b: abs((b - actual.birthday).days), return_dtype=pl.Int64).alias('Birthday'),
+        (pl.col('Labor Hours') - actual.labor_hours).abs().cast(pl.Float64).alias('Labor Hours'),
+        (1 - (pl.col('Epidural') == actual.epidural).cast(pl.Float64)).alias('Epidural'),
+        (1 - (pl.col('Cut Cord') == actual.cut_cord).cast(pl.Float64)).alias('Cut Cord'),
+        (1 - (pl.col('Catch Baby') == actual.catch).cast(pl.Float64)).alias('Catch Baby'),
+        (1 - (pl.col('Faint') == actual.faint).cast(pl.Float64)).alias('Faint')
     ).drop(['Pounds', 'Ounces'])  # Now that we calculated weight, we don't need these
 
     # Scale some distances so that all distances are between 0 and 1
@@ -113,6 +108,35 @@ if __name__ == '__main__':
     overall_scores = scores_by_column.with_columns(
         pl.sum_horizontal(pl.col(c) for c in columns_for_score).alias('Overall Score')
     ).drop(columns_for_score)
+
+    return overall_scores
+
+if __name__ == '__main__':
+    actual = BabyStats(
+        os.getenv('ACTUAL_FIRST_NAME'),
+        os.getenv('ACTUAL_MIDDLE_NAME'),
+        os.getenv('ACTUAL_GENDER'),
+        os.getenv('ACTUAL_HAIR_COLOR'),
+        os.getenv('ACTUAL_EYE_COLOR'),
+        int(os.getenv('ACTUAL_LENGTH')),
+        int(os.getenv('ACTUAL_WEIGHT_LBS')),
+        int(os.getenv('ACTUAL_WEIGHT_OZS')),
+        dt.datetime.strptime(os.getenv('ACTUAL_BIRTHDAY'), '%m/%d/%Y').date(),
+        int(os.getenv('ACTUAL_LABOR_HOURS')),
+        os.getenv('ACTUAL_EPIDURAL'),
+        os.getenv('ACTUAL_CUT_CORD'),
+        os.getenv('ACTUAL_CATCH'),
+        os.getenv('ACTUAL_FAINT')
+    )
+
+    creds = ServiceAccountCredentials.from_json_keyfile_name(KEY_PATH, SCOPE)
+    client = gspread.authorize(creds)
+
+    sheet = client.open_by_key(SHEET_ID)
+    worksheet = sheet.sheet1
+    records = worksheet.get_all_records()
+
+    overall_scores = calc_scores(records, actual)
 
     OUTPUT_DIR.mkdir(exist_ok=True)
 
