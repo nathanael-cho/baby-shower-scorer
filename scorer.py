@@ -45,6 +45,9 @@ def score_name(prop_name: str, actual_val: str) -> pl.Expr:
 def score_str(prop_name: str, actual_val: str) -> pl.Expr:
     return (1 - (pl.col(prop_name) == actual_val).cast(pl.Float64)).alias(prop_name)
 
+def score_num(prop_name: str, actual_val: Union[int, float]) -> pl.Expr:
+    return (pl.col(prop_name) - actual_val).abs().cast(pl.Float64).alias(prop_name)
+
 def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabyStats) -> pl.DataFrame:
     # The DataFrame is definitely overkill, but oh well
     df = pl.DataFrame(records)
@@ -79,10 +82,10 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
         score_str('Gender', actual.gender),
         score_str('Hair Color', actual.hair),
         score_str('Eye Color', actual.eye),
-        (pl.col('Length') - actual.length).abs().cast(pl.Float64).alias('Length'),
+        score_num('Length', actual.length),
         pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (actual.weight_lbs + actual.weight_ozs / 16.)), return_dtype=pl.Float64).alias('Weight'),
         pl.col('Birthday').map_elements(lambda b: abs((b - actual.birthday).days), return_dtype=pl.Int64).alias('Birthday'),
-        (pl.col('Labor Hours') - actual.labor_hours).abs().cast(pl.Float64).alias('Labor Hours'),
+        score_num('Labor Hours', actual.labor_hours),
         score_str('Epidural', actual.epidural),
         score_str('Cut Cord', actual.cut_cord),
         score_str('Catch Baby', actual.catch),
