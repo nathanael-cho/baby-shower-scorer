@@ -39,6 +39,9 @@ def calc_name_distance(n1: str, n2: str) -> float:
     #      where closer is better
     return 1 - difflib.SequenceMatcher(None, n1.strip().lower(), n2.strip().lower()).ratio()
 
+def score_name(prop_name: str, actual_val: str) -> pl.Expr:
+    return pl.col(prop_name).map_elements(lambda n: calc_name_distance(n, actual_val), return_dtype=pl.Float64).alias(prop_name)
+
 def score_str(prop_name: str, actual_val: str) -> pl.Expr:
     return (1 - (pl.col(prop_name) == actual_val).cast(pl.Float64)).alias(prop_name)
 
@@ -71,8 +74,8 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
     # Furthermore, make sure all of these are nonnegative and yield 0 for an exact answer
     # Also, make sure all of these are Float64s
     distances = entries.with_columns(
-        pl.col('First Name').map_elements(lambda f: calc_name_distance(f, actual.first), return_dtype=pl.Float64).alias('First Name'),
-        pl.col('Middle Name').map_elements(lambda m: calc_name_distance(m, actual.middle), return_dtype=pl.Float64).alias('Middle Name'),
+        score_name('First Name', actual.first),
+        score_name('Middle Name', actual.middle),
         score_str('Gender', actual.gender),
         score_str('Hair Color', actual.hair),
         score_str('Eye Color', actual.eye),
