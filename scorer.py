@@ -39,6 +39,9 @@ def calc_name_distance(n1: str, n2: str) -> float:
     #      where closer is better
     return 1 - difflib.SequenceMatcher(None, n1.strip().lower(), n2.strip().lower()).ratio()
 
+def score_str(prop_name: str, actual_val: str) -> pl.Expr:
+    return (1 - (pl.col(prop_name) == actual_val).cast(pl.Float64)).alias(prop_name)
+
 def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabyStats) -> pl.DataFrame:
     # The DataFrame is definitely overkill, but oh well
     df = pl.DataFrame(records)
@@ -70,17 +73,17 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
     distances = entries.with_columns(
         pl.col('First Name').map_elements(lambda f: calc_name_distance(f, actual.first), return_dtype=pl.Float64).alias('First Name'),
         pl.col('Middle Name').map_elements(lambda m: calc_name_distance(m, actual.middle), return_dtype=pl.Float64).alias('Middle Name'),
-        (1 - (pl.col('Gender') == actual.gender).cast(pl.Float64)).alias('Gender'),
-        (1 - (pl.col('Hair Color') == actual.hair).cast(pl.Float64)).alias('Hair Color'),
-        (1 - (pl.col('Eye Color') == actual.eye).cast(pl.Float64)).alias('Eye Color'),
+        score_str('Gender', actual.gender),
+        score_str('Hair Color', actual.hair),
+        score_str('Eye Color', actual.eye),
         (pl.col('Length') - actual.length).abs().cast(pl.Float64).alias('Length'),
         pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (actual.weight_lbs + actual.weight_ozs / 16.)), return_dtype=pl.Float64).alias('Weight'),
         pl.col('Birthday').map_elements(lambda b: abs((b - actual.birthday).days), return_dtype=pl.Int64).alias('Birthday'),
         (pl.col('Labor Hours') - actual.labor_hours).abs().cast(pl.Float64).alias('Labor Hours'),
-        (1 - (pl.col('Epidural') == actual.epidural).cast(pl.Float64)).alias('Epidural'),
-        (1 - (pl.col('Cut Cord') == actual.cut_cord).cast(pl.Float64)).alias('Cut Cord'),
-        (1 - (pl.col('Catch Baby') == actual.catch).cast(pl.Float64)).alias('Catch Baby'),
-        (1 - (pl.col('Faint') == actual.faint).cast(pl.Float64)).alias('Faint')
+        score_str('Epidural', actual.epidural),
+        score_str('Cut Cord', actual.cut_cord),
+        score_str('Catch Baby', actual.catch),
+        score_str('Faint', actual.faint),
     ).drop(['Pounds', 'Ounces'])  # Now that we calculated weight, we don't need these
 
     # Scale some distances so that all distances are between 0 and 1
