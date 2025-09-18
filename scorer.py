@@ -34,6 +34,11 @@ class BabyStats(NamedTuple):
     catch: str
     faint: str
 
+def calc_weight(pounds: int, ounces: int) -> float:
+    if ounces >= 16:
+        return ounces / 16.
+    return pounds + ounces / 16.
+
 def calc_name_distance(n1: str, n2: str) -> float:
     # The ratio is a measure of similarity between 0 and 1, so 1 - it yields a "typical" distance
     #      where closer is better
@@ -73,6 +78,9 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
     # Clean up the dates
     entries = entries.with_columns(pl.col('Birthday').str.strptime(pl.Date, '%m/%d/%Y').alias('Birthday'))
 
+    # Rebase dates to only factor month and day into account
+    entries = entries.with_columns(pl.col('Birthday').map_elements(lambda b: dt.date(2025, b.month, b.day), return_dtype=pl.Date).alias('Birthday'))
+
     # For all of these, make sure that a lower value is better, "closer" in distance terms
     # Furthermore, make sure all of these are nonnegative and yield 0 for an exact answer
     # Also, make sure all of these are Float64s
@@ -83,7 +91,10 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
         score_str('Hair Color', actual.hair),
         score_str('Eye Color', actual.eye),
         score_num('Length', actual.length),
-        pl.struct(['Pounds', 'Ounces']).map_elements(lambda e: abs((e['Pounds'] + e['Ounces'] / 16.) - (actual.weight_lbs + actual.weight_ozs / 16.)), return_dtype=pl.Float64).alias('Weight'),
+        pl.struct(['Pounds', 'Ounces']).map_elements(
+            lambda e: abs(calc_weight(e['Pounds'], e['Ounces']) - calc_weight(actual.weight_lbs, actual.weight_ozs)),
+            return_dtype=pl.Float64
+        ).alias('Weight'),
         pl.col('Birthday').map_elements(lambda b: abs((b - actual.birthday).days), return_dtype=pl.Int64).alias('Birthday'),
         score_num('Labor Hours', actual.labor_hours),
         score_str('Epidural', actual.epidural),
@@ -116,7 +127,7 @@ def calc_scores(records: List[Dict[str, Union[str, int, float]]], actual: BabySt
     ]
     overall_scores = scores_by_column.with_columns(
         pl.sum_horizontal(pl.col(c) for c in columns_for_score).alias('Overall Score')
-    ).drop(columns_for_score)
+    ).sort('Overall Score', descending=True).select(['Timestamp', 'Your Name', 'Your Email', 'Overall Score'] + columns_for_score)
 
     return overall_scores
 
